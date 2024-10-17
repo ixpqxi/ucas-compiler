@@ -1,0 +1,110 @@
+//==--- tools/clang-check/ClangInterpreter.cpp - Clang Interpreter tool --------------===//
+//===----------------------------------------------------------------------===//
+
+#include "clang/AST/ASTConsumer.h"
+#include "clang/AST/EvaluatedExprVisitor.h"
+#include "clang/Frontend/CompilerInstance.h"
+#include "clang/Frontend/FrontendAction.h"
+#include "clang/Tooling/Tooling.h"
+#include <iostream>
+#include <fstream>
+#include <sstream>
+
+using namespace clang;
+
+#include "Environment.h"
+
+class InterpreterVisitor : 
+   public EvaluatedExprVisitor<InterpreterVisitor> {
+public:
+   explicit InterpreterVisitor(const ASTContext &context, Environment * env)
+   : EvaluatedExprVisitor(context), mEnv(env) {}
+   virtual ~InterpreterVisitor() {}
+
+   virtual void VisitBinaryOperator (BinaryOperator * bop) {
+      std::cout << "binary OP" << std::endl;
+	   VisitStmt(bop);
+	   mEnv->binop(bop);
+   }
+   virtual void VisitDeclRefExpr(DeclRefExpr * expr) {
+      std::cout << "decl ref OP" << std::endl;
+	   VisitStmt(expr);
+	   mEnv->declref(expr);
+   }
+   virtual void VisitCastExpr(CastExpr * expr) {
+      std::cout << "cast OP" << std::endl;
+	   VisitStmt(expr);
+	   mEnv->cast(expr);
+   }
+   virtual void VisitCallExpr(CallExpr * call) {
+      std::cout << "call OP" << std::endl;
+	   VisitStmt(call);
+	   mEnv->call(call);
+   }
+   virtual void VisitDeclStmt(DeclStmt * declstmt) {
+      std::cout << "decl OP" << std::endl;
+	   mEnv->decl(declstmt);
+   }
+
+   virtual void VisitIfStmt(IfStmt *ifstmt) {
+      std::cout << "if OP" << std::endl;
+      mEnv->resolveIf(ifstmt);
+   }
+
+   virtual void VisitWhileStmt(WhileStmt *whilestmt) {
+      std::cout << "while OP" << std::endl;
+      mEnv->resolveWhile(whilestmt);
+   }
+
+   virtual void VisitForStmt(ForStmt * forstmt) {
+      std::cout << "ForStmt OP" << std::endl;
+      mEnv->resolveFor(forstmt);
+   }
+
+   virtual void VisitArraySubscriptExpr(ArraySubscriptExpr *arrayexpr) {
+      std::cout << "ArraySubscriptExpr OP" << std::endl;
+      mEnv->resolveArraySubscriptExpr(arrayexpr);
+   }
+private:
+   Environment * mEnv;
+};
+
+class InterpreterConsumer : public ASTConsumer {
+public:
+   explicit InterpreterConsumer(const ASTContext& context) : mEnv(),
+   	   mVisitor(context, &mEnv) {
+   }
+   virtual ~InterpreterConsumer() {}
+
+   virtual void HandleTranslationUnit(clang::ASTContext &Context) {
+	   TranslationUnitDecl * decl = Context.getTranslationUnitDecl();
+	   mEnv.init(decl);
+
+	   FunctionDecl * entry = mEnv.getEntry();
+	   mVisitor.VisitStmt(entry->getBody());
+  }
+private:
+   Environment mEnv;
+   InterpreterVisitor mVisitor;
+};
+
+class InterpreterClassAction : public ASTFrontendAction {
+public: 
+  virtual std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(
+    clang::CompilerInstance &Compiler, llvm::StringRef InFile) {
+    return std::unique_ptr<clang::ASTConsumer>(
+        new InterpreterConsumer(Compiler.getASTContext()));
+  }
+};
+
+int main (int argc, char ** argv) {
+   if (argc > 1) {
+      std::ostringstream buf;
+      std::fstream fin(argv[1]);
+      buf << fin.rdbuf();
+      
+      clang::tooling::runToolOnCode(std::unique_ptr<clang::FrontendAction>(new InterpreterClassAction), buf.str());
+      
+      fin.close();
+   }
+}
