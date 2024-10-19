@@ -61,9 +61,28 @@ public:
       mEnv->resolveFor(forstmt);
    }
 
+   virtual void VisitUnaryOperator(UnaryOperator *unop) {
+      VisitStmt(unop);
+      mEnv->resolveUnaryOperator(unop);
+   }
+
    virtual void VisitArraySubscriptExpr(ArraySubscriptExpr *arrayexpr) {
-      std::cout << "ArraySubscriptExpr OP" << std::endl;
+      VisitStmt(arrayexpr);
       mEnv->resolveArraySubscriptExpr(arrayexpr);
+   }
+
+   virtual void VisitUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *expr) {
+      std::cout << "UnaryExprOrTypeTraitExpr OP" << std::endl;
+      mEnv->resolveUnaryExprOrTypeTraitExpr(expr);
+   }
+
+   virtual void VisitIntegerLiteral(IntegerLiteral *expr) {
+      mEnv->resolveIntegerLiteral(expr);
+   }
+
+   virtual void VisitParenExpr(ParenExpr *expr) {
+      VisitStmt(expr);
+      mEnv->resolveParenExpr(expr);
    }
 private:
    Environment * mEnv;

@@ -9,6 +9,8 @@
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Tooling/Tooling.h"
 
+#define DEBUG
+
 using namespace clang;
 using namespace std;
 
@@ -63,18 +65,36 @@ public:
 };
 
 /// Heap maps address to a value
-/*
+
 class Heap {
+private:
+	std::map<int, void*> space;
+
 public:
-   int Malloc(int size) ;
-   void Free (int addr) ;
-   void Update(int addr, int val) ;
-   int get(int addr);
+	int Malloc(int size) {
+		int start = space.size();
+		for(int i=0; i<size/4; i++)
+			space[start+i] = (void*)malloc(4);
+		return start;
+	}
+	void Free (int addr) {
+		assert (space.find(addr) != space.end());
+		free(space[addr]);
+		space[addr] = nullptr;
+	}
+	void Update(int addr, int val) {
+		assert (space.find(addr) != space.end() && space[addr]);
+		*((int*)(space[addr])) = val;
+	}
+	int get(int addr) {
+		assert (space.find(addr) != space.end() && space[addr]);
+		return *((int*)(space[addr]));
+	}
 };
-*/
 
 class Environment {
 	std::vector<StackFrame> mStack;
+	Heap mHeap;
 
 	FunctionDecl * mFree;				/// Declartions to the built-in functions
 	FunctionDecl * mMalloc;
@@ -112,7 +132,7 @@ public:
 				gVars[vdecl] = value;
 			}
 		}
-		cout << "init" << endl;
+
 		mStack.push_back(StackFrame(gVars));
 	}
 
@@ -126,18 +146,18 @@ public:
 		Expr * right = bop->getRHS();
 
 		if (bop->isAssignmentOp()) {
-			int val = 0;
-			if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(right)) {
-				val = intLit->getValue().getZExtValue();
-			} else {
-				resolver(right);
-				val = mStack.back().getStmtVal(right);
-			}
-			mStack.back().bindStmt(left, val);
+			int val = mStack.back().getStmtVal(right);
 
 			if (DeclRefExpr * declexpr = dyn_cast<DeclRefExpr>(left)) {
 				Decl * decl = declexpr->getFoundDecl();
 				mStack.back().bindDecl(decl, val);
+			}else if(UnaryOperator *unop = dyn_cast<UnaryOperator>(left)){
+				if(unop->getOpcodeStr(unop->getOpcode()) == "*"){
+					int addr = mStack.back().getStmtVal(left);
+					mHeap.Update(addr, val);
+					cout << "update addr: " << addr << "to: " << val<< endl;
+					return;
+				}
 			}else{
 				if(ArraySubscriptExpr *arrayexpr = dyn_cast<ArraySubscriptExpr>(left)){
 					Decl *arraydecl = nullptr;
@@ -161,19 +181,20 @@ public:
 			}
 			mStack.back().bindStmt(bop, val);
 		} else if (bop->isComparisonOp()) {
-			cout << "comp" << endl;
 			int rval = 0;
 			int lval = 0;
 
-			if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(right)) {
-				rval = intLit->getValue().getZExtValue();
-			} else {
-				resolver(right);
-				rval = mStack.back().getStmtVal(right);
-			}
+			// if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(right)) {
+			// 	rval = intLit->getValue().getZExtValue();
+			// } else {
+			// 	resolver(right);
+			// 	rval = mStack.back().getStmtVal(right);
+			// }
+			rval = mStack.back().getStmtVal(right);
 
-			resolver(left);
+			// resolver(left);
 			lval = mStack.back().getStmtVal(left);
+			cout << "comp" << endl;
 
 			std::string opcode = bop->getOpcodeStr();
 			bool comprst = false;
@@ -189,19 +210,22 @@ public:
 			int lval = 0;
 			int rval = 0;
 
-			if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(left)) {
-				lval = intLit->getValue().getZExtValue();
-			}else{
-				resolver(left);
-				lval = mStack.back().getStmtVal(left);
-			}
+			// if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(left)) {
+			// 	lval = intLit->getValue().getZExtValue();
+			// }else{
+			// 	resolver(left);
+			// 	lval = mStack.back().getStmtVal(left);
+			// }
 			
-			if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(right)) {
-				rval = intLit->getValue().getZExtValue();
-			}else{
-				resolver(right);
-				rval = mStack.back().getStmtVal(right);
-			}
+			// if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(right)) {
+			// 	rval = intLit->getValue().getZExtValue();
+			// }else{
+			// 	resolver(right);
+			// 	rval = mStack.back().getStmtVal(right);
+			// }
+			lval = mStack.back().getStmtVal(left);
+			rval = mStack.back().getStmtVal(right);
+			// cout << "is bop point"  << bop->getType()->isPointerType() << endl;
 
 			std::string opcode = bop->getOpcodeStr();
 			if(opcode == "+"){
@@ -245,10 +269,12 @@ public:
 			if (VarDecl * vardecl = dyn_cast<VarDecl>(decl)) {
 				Expr *expr = vardecl->getInit();
 				if(vardecl->getType()->isArrayType()) {
+#ifdef DEBUG
+					cout << "array decl" << endl;
+#endif						
 					if (const ConstantArrayType *constArray = dyn_cast<ConstantArrayType>(vardecl->getType())) {
 						int size = constArray->getSize().getZExtValue();
 						mStack.back().bindArrayDecl(vardecl, size);
-						continue;
 					}
 				}else if(vardecl->getType()->isPointerType()) {
 					cout << "point decl" << endl;
@@ -274,15 +300,48 @@ public:
 			Decl* decl = declref->getFoundDecl();
 			int val = mStack.back().getDeclVal(decl);
 			mStack.back().bindStmt(declref, val);
+		} else if(declref->getType()->isPointerType() 
+			&& !declref->getType()->isFunctionPointerType()) {
+			cout << "declref test" << endl;
+			Decl* decl = declref->getFoundDecl();
+			int val = mStack.back().getDeclVal(decl);
+			mStack.back().bindStmt(declref, val);
+		} else if (declref->getType()->isArrayType()) {
+
 		}
 	}
 
 	void cast(CastExpr * castexpr) {
 		mStack.back().setPC(castexpr);
 		if (castexpr->getType()->isIntegerType()) {
-			Expr * expr = castexpr->getSubExpr();
-			int val = mStack.back().getStmtVal(expr);
-			mStack.back().bindStmt(castexpr, val);
+			Expr *expr = castexpr->getSubExpr();
+			if(UnaryOperator *unop = dyn_cast<UnaryOperator>(expr)){
+				if((unop->getOpcodeStr(unop->getOpcode()) == "*")){
+					int addr = mStack.back().getStmtVal(expr);
+					mStack.back().bindStmt(castexpr, mHeap.get(addr));
+				}
+			}else{
+				int val = mStack.back().getStmtVal(expr);
+				mStack.back().bindStmt(castexpr, val);
+			}
+		}else if(castexpr->getType()->isPointerType() && !castexpr->getType()->isFunctionPointerType()) {
+			Expr *expr = castexpr->getSubExpr();
+			if(UnaryOperator *unop = dyn_cast<UnaryOperator>(expr)){
+				if((unop->getOpcodeStr(unop->getOpcode()) == "*")){
+					int addr = mStack.back().getStmtVal(expr);
+					mStack.back().bindStmt(castexpr, mHeap.get(addr));
+				}
+			} else if (DeclRefExpr *declexpr = dyn_cast<DeclRefExpr>(expr)) {
+				if(declexpr->getType()->isArrayType()){
+					cout << "point decl test" << endl;
+				}else{
+					int addr = mStack.back().getStmtVal(expr);
+					mStack.back().bindStmt(castexpr, addr);
+				}
+			}else{
+				int addr = mStack.back().getStmtVal(expr);
+				mStack.back().bindStmt(castexpr, addr);
+			}
 		}
 	}
 
@@ -300,6 +359,29 @@ public:
 			Expr *decl = callexpr->getArg(0);
 			val = mStack.back().getStmtVal(decl);
 			llvm::errs() << val << "\n";
+		} else if (callee == mMalloc) {
+#ifdef DEBUG
+			cout << "call malloc" << endl;
+#endif
+			Expr *sexpr = callexpr->getArg(0);
+			int size = mStack.back().getStmtVal(sexpr);
+			int addr = mHeap.Malloc(size);
+			mStack.back().bindStmt(callexpr, addr);
+#ifdef DEBUG
+			cout << "malloc size: " << size
+			<< "\tmalloc addr: " << addr << endl;
+#endif
+		} else if (callee == mFree){
+#ifdef DEBUG
+			cout << "call free" << endl;
+#endif
+			Expr *argexpr = callexpr->getArg(0);
+			int addr = mStack.back().getStmtVal(argexpr);
+			mHeap.Free(addr);
+#ifdef DEBUG
+			cout << "free addr: " << addr << endl;
+#endif		
+
 		} else {
 			/// You could add your code here for Function call Return
 			FunctionDecl::param_const_iterator paramIt = callee->param_begin();
@@ -326,10 +408,9 @@ public:
 		bool condrst;
 		Expr *condExpr = ifstmt->getCond();
 
-		if(BinaryOperator *bop = dyn_cast<BinaryOperator>(condExpr)){
-			binop(bop);
-			condrst = mStack.back().getStmtVal(bop);
-		}
+		resolver(condExpr);
+		condrst = mStack.back().getStmtVal(condExpr);
+		cout << "if expr " << condrst << endl;
 
 		if(condrst){
 			Stmt *thenstmt = ifstmt->getThen();
@@ -342,6 +423,7 @@ public:
 				resolver(thenstmt);
 				val = mStack.back().getStmtVal(thenstmt);
 			}
+			cout << "then val: " << val << endl;
 		} else if(ifstmt->hasElseStorage()) {
 			Stmt *elsestmt = ifstmt->getElse();
 			if(CompoundStmt *comp = dyn_cast<CompoundStmt>(elsestmt)){
@@ -353,6 +435,7 @@ public:
 				resolver(elsestmt);
 				val = mStack.back().getStmtVal(elsestmt);
 			}
+			cout << "else val: " << val << endl;
 		}
 		
 		mStack.back().bindStmt(ifstmt, val);
@@ -411,6 +494,7 @@ public:
 	}
 
 	void resolveArraySubscriptExpr(ArraySubscriptExpr *expr){
+		std::cout << "ArraySubscriptExpr OP" << std::endl;
 		Expr *bexpr = expr->getBase();
 		Expr *iexpr = expr->getIdx();
 
@@ -422,11 +506,7 @@ public:
 			}
 		}
 
-		int index = 0;
-		if(IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(iexpr)) {
-			index = intLit->getValue().getZExtValue();
-		}
-
+		int index = mStack.back().getStmtVal(iexpr);
 		
 		int val = mStack.back().getArrayVal(arraydecl, index);
 		cout << "array[" << index << "] = " << val << endl;
@@ -443,6 +523,7 @@ public:
 			resolver(stmt);
 			val = mStack.back().getStmtVal(stmt);
 		}
+		
 		return val;
 	}
 
@@ -450,8 +531,12 @@ public:
 		if(IfStmt *ifstmt = dyn_cast<IfStmt>(stmt)){
 			resolveIf(ifstmt);
 		}else if(ReturnStmt *retstmt = dyn_cast<ReturnStmt>(stmt)){
+			cout << "retrun expr" << endl;
+			resolver(retstmt->getRetValue());
 			resolveReturn(retstmt);
 		}else if(BinaryOperator *bop = dyn_cast<BinaryOperator>(stmt)){
+			resolver(bop->getLHS());
+			resolver(bop->getRHS());
 			binop(bop);
 		}else if(CastExpr *castexpr = dyn_cast<CastExpr>(stmt)){
 			resolver(castexpr->getSubExpr());
@@ -461,6 +546,7 @@ public:
 		}else if(CallExpr *callexpr = dyn_cast<CallExpr>(stmt)){
 			call(callexpr);
 		}else if(UnaryOperator *unop = dyn_cast<UnaryOperator>(stmt)){
+			resolver(unop->getSubExpr());
 			resolveUnaryOperator(unop);
 		}else if(WhileStmt *whilestmt = dyn_cast<WhileStmt>(stmt)){
 			cout << "while stmt" << endl;
@@ -471,42 +557,57 @@ public:
 		}else if(ForStmt *forstmt = dyn_cast<ForStmt>(stmt)) {
 			resolveFor(forstmt);
 			mStack.back().bindStmt(stmt, 0);
+		}else if(IntegerLiteral *expr = dyn_cast<IntegerLiteral>(stmt)){
+			resolveIntegerLiteral(expr);
+		}else if(ArraySubscriptExpr *arrayexpr = dyn_cast<ArraySubscriptExpr>(stmt)){
+			resolver(arrayexpr->getIdx());
+			resolveArraySubscriptExpr(arrayexpr);
 		}
 	}
 
 	void resolveReturn(ReturnStmt *retstmt){
-		int val = 0;
+		mStack.back().setPC(retstmt);
 		Expr *expr = retstmt->getRetValue();
-
-		if(IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(expr)){
-			val = intLit->getValue().getZExtValue();
-		}else if(ImplicitCastExpr *castexpr = dyn_cast<ImplicitCastExpr>(expr)){
-			Expr *expr = castexpr->getSubExpr();
-			if(ArraySubscriptExpr *arrayexpr = dyn_cast<ArraySubscriptExpr>(expr)){
-				resolveArraySubscriptExpr(arrayexpr);
-				val = mStack.back().getStmtVal(arrayexpr);
-			}
-		}else{
-			resolver(expr);
-			val = mStack.back().getStmtVal(expr);
-		}
+		int val = mStack.back().getStmtVal(expr);
 		mStack.back().bindStmt(retstmt, val);
 	}
 
 	void resolveUnaryOperator(UnaryOperator *unop){
-		int val = 0;
+		cout << "UnaryOperator OP" << endl;
 		Expr *expr = unop->getSubExpr();
 		string opcode =  unop->getOpcodeStr(unop->getOpcode());
-		
-		if(IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(expr)){
-			val = intLit->getValue().getZExtValue();
-		}else{
-			resolver(expr);
-			val = mStack.back().getStmtVal(expr);
-		}
+
+		int val = mStack.back().getStmtVal(expr);
 
 		if(opcode == "-")
 			mStack.back().bindStmt(unop, -val);
+		else if(opcode == "*"){
+			cout << "get addr: " << val << endl;
+			mStack.back().bindStmt(unop, val);
+		}
+	}
+
+	void resolveUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *expr) {
+		std::string type = expr->getArgumentType().getAsString();
+		if(type == "int"){
+			mStack.back().bindStmt(expr, 4);
+		}else {
+			mStack.back().bindStmt(expr, 4);
+		}
+	}
+
+	void resolveIntegerLiteral(IntegerLiteral *expr) {
+		cout << "IntegerLiteral OP" << endl;
+		int val = expr->getValue().getZExtValue();
+		mStack.back().bindStmt(expr, val);
+	}
+
+	void resolveParenExpr(ParenExpr *expr) {
+		cout << "ParenExpr OP" << endl;
+		Expr *subexpr = expr->getSubExpr();
+		int val = mStack.back().getStmtVal(subexpr);
+		mStack.back().bindStmt(expr, val);
+		cout << "resolveParenExpr val: " << val << endl;
 	}
 };
 
