@@ -64,7 +64,6 @@ public:
    }
 
    virtual void VisitUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *expr) {
-      std::cout << "UnaryExprOrTypeTraitExpr OP" << std::endl;
       mEnv->resolveUnaryExprOrTypeTraitExpr(expr);
    }
 
@@ -110,12 +109,6 @@ public:
 
 int main (int argc, char ** argv) {
    if (argc > 1) {
-      std::ostringstream buf;
-      std::fstream fin(argv[1]);
-      buf << fin.rdbuf();
-      
-      clang::tooling::runToolOnCode(std::unique_ptr<clang::FrontendAction>(new InterpreterClassAction), buf.str());
-      
-      fin.close();
+       clang::tooling::runToolOnCode(std::unique_ptr<clang::FrontendAction>(new InterpreterClassAction), argv[1]);
    }
 }

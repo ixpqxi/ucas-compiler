@@ -69,26 +69,71 @@ public:
 class Heap {
 private:
 	std::map<int, void*> space;
+	int idx;
 
 public:
+	Heap(){ idx = 0; } 
+
 	int Malloc(int size) {
-		int start = space.size();
-		for(int i=0; i<size/4; i++)
-			space[start+i] = (void*)malloc(4);
-		return start;
+		int addr = idx;
+		space[addr] = (void*)malloc(size);
+		idx += size;
+		return addr;
 	}
 	void Free (int addr) {
 		assert (space.find(addr) != space.end());
 		free(space[addr]);
 		space[addr] = nullptr;
+		space.erase(addr);
 	}
-	void Update(int addr, int val) {
-		assert (space.find(addr) != space.end() && space[addr]);
-		*((int*)(space[addr])) = val;
+	void Update(int addr, int size, int val) {
+		int raddr = 0;
+		if(space.find(addr) == space.end()){
+			int faddr = -1;
+			for(auto i = space.begin(); i != space.end(); i++){
+				if(addr > faddr && addr < i->first){
+					raddr = faddr;
+					break;
+				}
+				faddr = i->first;
+			}
+		}else{
+			raddr = addr;
+		}
+		assert (space.find(raddr) != space.end() && space[raddr]);
+		int offset = addr - raddr;
+
+		if(size == sizeof(char))
+			*((char*)((char*)space[raddr]+offset)) = val;
+		else if(size == sizeof(int))
+			*((int*)((char*)space[raddr]+offset)) = val;
+		else if(size == sizeof(char*))
+			*((long*)((char*)space[raddr]+offset)) = val;
 	}
-	int get(int addr) {
-		assert (space.find(addr) != space.end() && space[addr]);
-		return *((int*)(space[addr]));
+	int get(int addr, int size) {
+		int raddr = 0;
+		if(space.find(addr) == space.end()){
+			int faddr = -1;
+			for(auto i = space.begin(); i != space.end(); i++){
+				if(addr > faddr && addr < i->first){
+					raddr = faddr;
+					break;
+				}
+				faddr = i->first;
+			}
+		}else{
+			raddr = addr;
+		}
+		assert (space.find(raddr) != space.end() && space[raddr]);
+		int offset = addr - raddr;
+
+		if(size == sizeof(char))
+			return *((char*)((char*)space[raddr]+offset));
+		else if(size == sizeof(int))
+			return *((int*)((char*)space[raddr]+offset));
+		else if(size == sizeof(char*))
+			return *((long*)((char*)space[raddr]+offset));
+		return 0;
 	}
 };
 
@@ -153,10 +198,16 @@ public:
 			}else if(UnaryOperator *unop = dyn_cast<UnaryOperator>(left)){
 				if(unop->getOpcodeStr(unop->getOpcode()) == "*"){
 					int addr = mStack.back().getStmtVal(left);
-					mHeap.Update(addr, val);
-#ifdef DEBUG
-					cout << "update addr: " << addr << "to: " << val<< endl;
-#endif
+					std::string type = bop->getType().getAsString();
+					if(type == "int"){
+						mHeap.Update(addr, sizeof(int), val);
+					}else if(type == "int *"){
+						mHeap.Update(addr, sizeof(int*), val);
+					}else if(type == "char"){
+						mHeap.Update(addr, sizeof(char), val);
+					}else if(type == "char *"){
+						mHeap.Update(addr, sizeof(char*), val);
+					}
 					return;
 				}
 			}else{
@@ -184,19 +235,8 @@ public:
 			}
 			mStack.back().bindStmt(bop, val);
 		} else if (bop->isComparisonOp()) {
-			int rval = 0;
-			int lval = 0;
-
-			// if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(right)) {
-			// 	rval = intLit->getValue().getZExtValue();
-			// } else {
-			// 	resolver(right);
-			// 	rval = mStack.back().getStmtVal(right);
-			// }
-			rval = mStack.back().getStmtVal(right);
-
-			// resolver(left);
-			lval = mStack.back().getStmtVal(left);
+			int rval = mStack.back().getStmtVal(right);
+			int lval = mStack.back().getStmtVal(left);
 
 			std::string opcode = bop->getOpcodeStr();
 			bool comprst = false;
@@ -209,38 +249,24 @@ public:
 			}
 			mStack.back().bindStmt(bop, comprst);
 		}else if(bop->isAdditiveOp()){
-			int lval = 0;
-			int rval = 0;
+			int step = 1;
+			int lval = mStack.back().getStmtVal(left);
+			int rval = mStack.back().getStmtVal(right);
 
-			lval = mStack.back().getStmtVal(left);
-			rval = mStack.back().getStmtVal(right);
+			if(bop->getType()->isPointerType()){
+				std::string type = bop->getType().getAsString();
+				if(type == "int *")	step = sizeof(int);
+			}
 
 			std::string opcode = bop->getOpcodeStr();
 			if(opcode == "+"){
-				mStack.back().bindStmt(bop, lval+rval);
+				mStack.back().bindStmt(bop, lval+rval*step);
 			}else if(opcode == "-"){
-				mStack.back().bindStmt(bop, lval-rval);
+				mStack.back().bindStmt(bop, lval-rval*step);
 			}
 		}else if(bop->isMultiplicativeOp()){
-			int lval = 0;
-			int rval = 0;
-
-			if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(left)) {
-				lval = intLit->getValue().getZExtValue();
-			}else{
-				resolver(left);
-				lval = mStack.back().getStmtVal(left);
-			}
-			
-			if (IntegerLiteral *intLit = dyn_cast<IntegerLiteral>(right)) {
-				rval = intLit->getValue().getZExtValue();
-			}else{
-				resolver(right);
-				rval = mStack.back().getStmtVal(right);
-
-				vector<int> *list = new vector<int>(10);
-				list++;
-			}
+			int rval = mStack.back().getStmtVal(right);
+			int lval = mStack.back().getStmtVal(left);
 
 			std::string opcode = bop->getOpcodeStr();
 			if(opcode == "*"){
@@ -300,8 +326,6 @@ public:
 			Decl* decl = declref->getFoundDecl();
 			int val = mStack.back().getDeclVal(decl);
 			mStack.back().bindStmt(declref, val);
-		} else if (declref->getType()->isArrayType()) {
-
 		}
 	}
 
@@ -315,7 +339,26 @@ public:
 			if(UnaryOperator *unop = dyn_cast<UnaryOperator>(expr)){
 				if((unop->getOpcodeStr(unop->getOpcode()) == "*")){
 					int addr = mStack.back().getStmtVal(expr);
-					mStack.back().bindStmt(castexpr, mHeap.get(addr));
+					std::string type = castexpr->getType().getAsString();
+					if(type == "int"){
+						int val = mHeap.get(addr, sizeof(int));
+						mStack.back().bindStmt(castexpr, val);
+					}else if(type == "int *"){
+						int val = mHeap.get(addr, sizeof(int*));
+						mStack.back().bindStmt(castexpr, val);
+					}else if(type == "char"){
+						int val = mHeap.get(addr, sizeof(char));
+						mStack.back().bindStmt(castexpr, val);
+#ifdef DEBUG
+						cout << "get " << addr << " size: " << sizeof(char) << " val: " << val << endl;
+#endif
+					}else if(type == "char *"){
+						int val = mHeap.get(addr, sizeof(char*));
+						mStack.back().bindStmt(castexpr, val);
+#ifdef DEBUG
+						cout << "get " << addr << " size: " << sizeof(char) << " val: " << val << endl;
+#endif
+					}
 				}
 			}else{
 				int val = mStack.back().getStmtVal(expr);
@@ -326,7 +369,17 @@ public:
 			if(UnaryOperator *unop = dyn_cast<UnaryOperator>(expr)){
 				if((unop->getOpcodeStr(unop->getOpcode()) == "*")){
 					int addr = mStack.back().getStmtVal(expr);
-					mStack.back().bindStmt(castexpr, mHeap.get(addr));
+					std::string type = castexpr->getType().getAsString();
+					
+					if(type == "int"){
+						mStack.back().bindStmt(castexpr, mHeap.get(addr, sizeof(int)));
+					}else if(type == "int *"){
+						mStack.back().bindStmt(castexpr, mHeap.get(addr, sizeof(int*)));
+					}else if(type == "char"){
+						mStack.back().bindStmt(castexpr, mHeap.get(addr, sizeof(char)));
+					}else if(type == "char *"){
+						mStack.back().bindStmt(castexpr, mHeap.get(addr, sizeof(char*)));
+					}
 				}
 			} else if (DeclRefExpr *declexpr = dyn_cast<DeclRefExpr>(expr)) {
 				if(declexpr->getType()->isArrayType()){
@@ -369,8 +422,7 @@ public:
 			int addr = mHeap.Malloc(size);
 			mStack.back().bindStmt(callexpr, addr);
 #ifdef DEBUG
-			cout << "malloc size: " << size
-			<< "\tmalloc addr: " << addr << endl;
+			cout << "malloc size: " << size << "\tmalloc addr: " << addr << endl;
 #endif
 		} else if (callee == mFree){
 #ifdef DEBUG
@@ -438,7 +490,6 @@ public:
 				resolver(thenstmt);
 				val = mStack.back().getStmtVal(thenstmt);
 			}
-			// cout << "then val: " << val << endl;
 		} else if(ifstmt->hasElseStorage()) {
 			Stmt *elsestmt = ifstmt->getElse();
 			if(CompoundStmt *comp = dyn_cast<CompoundStmt>(elsestmt)){
@@ -453,7 +504,6 @@ public:
 		}
 		
 		mStack.back().bindStmt(ifstmt, val);
-		// cout << "end IF" << endl;
 	}
 
 	void resolveWhile(WhileStmt *whilestmt){
@@ -597,7 +647,6 @@ public:
 		if(opcode == "-")
 			mStack.back().bindStmt(unop, -val);
 		else if(opcode == "*"){
-			cout << "get addr: " << val << endl;
 			mStack.back().bindStmt(unop, val);
 		}
 	}
@@ -606,8 +655,8 @@ public:
 		std::string type = expr->getArgumentType().getAsString();
 		if(type == "int"){
 			mStack.back().bindStmt(expr, 4);
-		}else {
-			mStack.back().bindStmt(expr, 4);
+		}else if(type == "int *"){
+			mStack.back().bindStmt(expr, 8);
 		}
 	}
 
@@ -617,7 +666,9 @@ public:
 	}
 
 	void resolveParenExpr(ParenExpr *expr) {
-		cout << "ParenExpr OP" << endl;
+#ifdef DEBUG
+		cout << "ParenExpr OP " << endl;
+#endif
 		Expr *subexpr = expr->getSubExpr();
 		int val = mStack.back().getStmtVal(subexpr);
 		mStack.back().bindStmt(expr, val);
