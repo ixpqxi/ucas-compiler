@@ -22,42 +22,34 @@ public:
    virtual ~InterpreterVisitor() {}
 
    virtual void VisitBinaryOperator (BinaryOperator * bop) {
-      std::cout << "binary OP" << std::endl;
 	   VisitStmt(bop);
 	   mEnv->binop(bop);
    }
    virtual void VisitDeclRefExpr(DeclRefExpr * expr) {
-      std::cout << "decl ref OP" << std::endl;
 	   VisitStmt(expr);
 	   mEnv->declref(expr);
    }
    virtual void VisitCastExpr(CastExpr * expr) {
-      std::cout << "cast OP" << std::endl;
 	   VisitStmt(expr);
 	   mEnv->cast(expr);
    }
    virtual void VisitCallExpr(CallExpr * call) {
-      std::cout << "call OP" << std::endl;
 	   VisitStmt(call);
 	   mEnv->call(call);
    }
    virtual void VisitDeclStmt(DeclStmt * declstmt) {
-      std::cout << "decl OP" << std::endl;
 	   mEnv->decl(declstmt);
    }
 
    virtual void VisitIfStmt(IfStmt *ifstmt) {
-      std::cout << "if OP" << std::endl;
       mEnv->resolveIf(ifstmt);
    }
 
    virtual void VisitWhileStmt(WhileStmt *whilestmt) {
-      std::cout << "while OP" << std::endl;
       mEnv->resolveWhile(whilestmt);
    }
 
    virtual void VisitForStmt(ForStmt * forstmt) {
-      std::cout << "ForStmt OP" << std::endl;
       mEnv->resolveFor(forstmt);
    }
 
