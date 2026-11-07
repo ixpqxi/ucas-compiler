@@ -1,5 +1,7 @@
 # 编译原理实验
 
+[English](README.md) | 简体中文
+
 本仓库包含三个基于 Clang/LLVM 的编译原理课程实验。每个实验相互独立，并各自包含`CMakeLists.txt`。
 
 ## 环境要求

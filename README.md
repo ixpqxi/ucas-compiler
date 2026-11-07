@@ -1,5 +1,7 @@
 # Compiler Principles Labs
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 This repository contains three compiler-course assignments based on Clang/LLVM. Each assignment is self-contained and has its own `CMakeLists.txt`.
 
 ## Prerequisites
